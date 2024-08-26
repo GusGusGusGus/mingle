@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -11,6 +12,7 @@ using API.DTOs;
 using API.Entities;
 using API.Intefaces;
 using AutoMapper;
+using Google.Apis.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI.Services;
@@ -18,6 +20,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 
 
 namespace API.Controllers
@@ -27,6 +30,7 @@ namespace API.Controllers
         private readonly ITokenService _tokenService;
         private readonly IMapper _mapper;
         private readonly IEmailSender _emailSender;
+        private readonly HttpClient _httpClient;
         private readonly ApplicationOptions _applicationOptions;
         private readonly UserManager<AppUser> _userManager;
         private readonly SignInManager<AppUser> _signInManager;
@@ -37,13 +41,15 @@ namespace API.Controllers
             ITokenService tokenService, 
             IMapper mapper,
             IEmailSender emailSender,
-            IOptions<ApplicationOptions> optionsAccessor)
+            IOptions<ApplicationOptions> optionsAccessor,
+            HttpClient httpClient)
         {
             _signInManager = signInManager;
             _userManager = userManager;
             _tokenService = tokenService;
             _mapper = mapper;
             _emailSender = emailSender;
+            _httpClient = httpClient;
             _applicationOptions = optionsAccessor.Value;
         }
 
@@ -409,5 +415,180 @@ namespace API.Controllers
             var emailExists = await _userManager.Users.AnyAsync(x => x.Email == userEmail.ToLower());
             return usernameExists || emailExists;
         }
+
+        [AllowAnonymous]
+        [HttpGet("external-login")]
+        public IActionResult ExternalLogin(string provider)
+        {
+            var redirectUrl = Url.Action("ExternalLoginCallback", "Account");
+            var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
+            return RedirectToAction(nameof(ExternalLoginCallback));
+        }
+
+        [AllowAnonymous]
+        [HttpGet("external-login-callback")]
+        public async Task<ActionResult<UserDTO>> ExternalLoginCallback()
+        {
+            var info = await _signInManager.GetExternalLoginInfoAsync();
+            if (info == null) return RedirectToAction(nameof(Login));
+
+            // Check if the user already exists
+            var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+            if (user == null)
+            {
+                // If the user doesn't exist, create a new one
+                user = new AppUser
+                {
+                    UserName = info.Principal.FindFirstValue(ClaimTypes.Name),
+                    Email = info.Principal.FindFirstValue(ClaimTypes.Email)
+                };
+
+                var result = await _userManager.CreateAsync(user);
+                if (!result.Succeeded) return BadRequest("Error creating new user");
+
+                // Assign the "Member" role to the new user
+                var roleResult = await _userManager.AddToRoleAsync(user, "Member");
+                if (!roleResult.Succeeded) return BadRequest(roleResult.Errors);
+
+                // Associate the new user with the Facebook login
+                await _userManager.AddLoginAsync(user, info);
+            }
+
+            // Generate the JWT token for the user
+            var token = await _tokenService.CreateToken(user);
+
+            return new UserDTO
+            {
+                Username = user.UserName,
+                KnownAs = user.KnownAs,
+                Gender = user.Gender,
+                Token = token,
+                PhotoUrl = user.Photos.FirstOrDefault(x => x.IsMain)?.Url,
+                Email = user.Email
+            };
+        }
+
+
+        [AllowAnonymous]
+        [HttpPost("LoginWithFacebook")]
+        public async Task<ActionResult<UserDTO>> LoginWithFacebook([FromBody] string credentials)
+        {
+            var response = await _httpClient.GetAsync($"https://graph.facebook.com/debug_token?input_token={credentials}&access_token={_applicationOptions.FacebookAppID}|{_applicationOptions.FacebookAppSecret}");
+            var userObj = JsonConvert.DeserializeObject<FBUser>(await response.Content.ReadAsStringAsync());
+            if (response.StatusCode != HttpStatusCode.OK || !userObj.Data.IsValid) return Unauthorized("Invalid Facebook credentials");
+            var meResponse = await _httpClient.GetAsync($"https://graph.facebook.com/me?fields=first_name,last_name,gender,email,id&access_token={credentials}");
+            var userContent = JsonConvert.DeserializeObject<FBUserInfo>(await meResponse.Content.ReadAsStringAsync());
+
+            var user = await _userManager.FindByEmailAsync(userContent.Email);
+            if (user == null)
+            {
+                user = new AppUser
+                {
+                    UserName = userContent.Email,
+                    Email = userContent.Email,
+                    FirstName = userContent.FirstName,
+                    LastName = userContent.LastName,
+                    KnownAs = userContent.FirstName,
+                    EmailConfirmed = true,
+                    Photos = new List<Photo>
+                    {
+                        new Photo
+                        {
+                            Url = $"https://graph.facebook.com/{userContent.Id}/picture?type=large",
+                            IsMain = true
+                        }
+                    },
+                    // FacebookId = userContent.Id,
+                    Gender = userContent.Gender ?? "default",
+                    Created = DateTime.Now,
+                    LastActive = DateTime.Now,
+                    DateOfBirth = userContent.Birthday != null ? DateTime.Parse(userContent.Birthday) : DateTime.Now.AddYears(-18),
+                    City = userContent.Location?.City ?? "default",
+                    Country = userContent.Location?.Country ?? "default",
+                    FacebookId = userContent.Id ?? "default"
+                };
+
+                var result = await _userManager.CreateAsync(user);
+                if (!result.Succeeded) return BadRequest("Error creating new user");
+
+                var roleResult = await _userManager.AddToRoleAsync(user, "Member");
+                if (!roleResult.Succeeded) return BadRequest(roleResult.Errors);
+            }
+
+            var token = await _tokenService.CreateToken(user);
+
+            return new UserDTO
+            {
+                Username = user.UserName,
+                KnownAs = user.KnownAs,
+                Token = token,
+                Email = user.Email
+            };
+        }
+
+        [AllowAnonymous]
+        [HttpPost("LoginWithGoogle")]
+        public async Task<ActionResult<UserDTO>> LoginWithGoogle([FromBody] string credentials)
+        {
+
+            var settings = new GoogleJsonWebSignature.ValidationSettings()
+            {
+                Audience = new List<string> { _applicationOptions.GoogleClientId }
+            };
+            
+            var payload = await GoogleJsonWebSignature.ValidateAsync(credentials, settings);
+
+
+            var user = await _userManager.FindByEmailAsync(payload.Email);
+            if (user == null)
+            {
+                user = new AppUser
+                {
+                    UserName = payload.Email,
+                    Email = payload.Email,
+                    FirstName = payload.GivenName,
+                    LastName = payload.FamilyName,
+                    KnownAs = payload.GivenName,
+                    EmailConfirmed = true,
+                    Photos = new List<Photo>
+                    {
+                        new Photo
+                        {
+                            Url = payload.Picture ?? "default",
+                            IsMain = true
+                        }
+                    },
+                    // Gender = payload.Gender ?? "default",
+                    Gender = "default",
+                    Created = DateTime.Now,
+                    LastActive = DateTime.Now,
+                    // DateOfBirth = payload.Birthday != null ? DateTime.Parse(payload.Birthday) : DateTime.Now.AddYears(-18),
+                    DateOfBirth = DateTime.Now.AddYears(-18),
+                    // City = payload.Location?.City ?? "default",
+                    City = "default",
+                    // Country = payload.Location?.Country ?? "default",
+                    Country = "default",
+                    GoogleId = payload.Subject ?? "default"
+                };
+
+                 var result = await _userManager.CreateAsync(user);
+                if (!result.Succeeded) return BadRequest("Error creating new user");
+
+                var roleResult = await _userManager.AddToRoleAsync(user, "Member");
+                if (!roleResult.Succeeded) return BadRequest(roleResult.Errors);
+            }
+
+            var token = await _tokenService.CreateToken(user);
+
+            return new UserDTO
+            {
+                Username = user.UserName,
+                KnownAs = user.KnownAs,
+                Token = token,
+                Email = user.Email
+            };
+
+        }
+    
     }
 }

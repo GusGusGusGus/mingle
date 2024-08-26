@@ -65,7 +65,7 @@ export class NavComponent implements OnInit{
 
   logout(){
     this.accountService.logout();
-    this.router.navigateByUrl('/');
+    this.router.navigateByUrl('/').then(() => {window.location.reload()});
   }
 
   openResetPasswordModal() {

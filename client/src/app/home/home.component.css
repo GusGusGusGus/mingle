@@ -7,7 +7,6 @@
     margin: 20px auto;
 }
 
-
 .separator::before,
 .separator::after {
     content: '';
@@ -20,4 +19,25 @@
     padding: 0 10px;
     background: #f0f0f0; /* same as body background color */
     color: #000;
+}
+
+#facebook-login-button {
+    background-color: #3b5998;
+    color: white;
+    width: 18.5%;
+    outline: none !important; /* Remove outline */
+}
+
+#facebook-login-button:hover {
+    color: white;
+    background-color: #3b599878;
+}
+
+
+
+.login-buttons-container {
+    display: flex;
+    flex-direction: column; /* Changed flex-direction to column */
+    align-items: center;
+    gap: 10px; /* Adjust the gap as needed */
 }

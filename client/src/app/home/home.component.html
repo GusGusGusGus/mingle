@@ -18,12 +18,32 @@
             <br>
 
                 <h2 class="text-center text-primary">Sign in</h2>
-                <button class="btn btn-primary mt-2" type="button" style="background-color: #DB4437; color: white; width: 20%;">
-                    <i class="fa fa-google mr-2"></i> Log in with Google
-                </button>  <br>
-                <button class="btn btn-primary mt-2" type="button" style="background-color: #3b5998; color: white; width: 20%;">
-                    <i class="fa fa-facebook-f mr-2"></i> Log in with Facebook
-                </button>
+                <div class="login-buttons-container">
+                    <br>
+                    <!-- <div id="google-login-button" 
+                        data-client_id="1041672957619-0trfmcgdkm4ceperlr34c98ae23rngua.apps.googleusercontent.com"
+                        data-callback="handleCredentialResponse" 
+                        type="button">
+                        <i class="fa fa-google mr-2"></i> Log in with Google
+                    </div>   -->
+
+                    <div id="google-login-button">
+                    </div>
+                   
+                    <button class="btn btn-primary mt-2" id="facebook-login-button" (click)="handleFacebookLogin()" type="button">
+                        <i class="fa fa-facebook-f mr-2"></i> Log in with Facebook
+                    </button>
+                    <script>
+                        window.fbAsyncInit = function() {
+                          FB.init({
+                            appId     : '693421629546834',
+                            cookie     : true,
+                            xfbml      : true,
+                            version    : 'v10.0'
+                          });
+                        };
+                    </script>
+                </div>
 
 
         </div>

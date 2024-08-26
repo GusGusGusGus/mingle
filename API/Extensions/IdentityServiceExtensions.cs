@@ -63,6 +63,15 @@ namespace API.Extensions
                             return Task.CompletedTask;
                         }
                     };
+                })
+                .AddFacebook(options =>
+                {
+                    options.AppId = config.GetSection("FacebookAppID").Value;
+                    options.AppSecret = config.GetSection("FacebookAppSecret").Value;
+                    options.CallbackPath = new PathString("/external-login-callback");
+                    options.SaveTokens = true; // This saves the tokens in the AuthenticationProperties
+                    // options.AccessDeniedPath = "/AccessDeniedPathInfo";
+
                 });
 
 

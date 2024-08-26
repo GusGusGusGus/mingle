@@ -39,6 +39,9 @@ In the API project's root, reate an appsettings.Development.json file and add th
 ` "ConnectionStrings": {  "DefaultConnection": "Server=localhost; Port=5432; User id=YourPostgreSQLUser; Password=YourPasswordHere; Database=yourDBName" } `
 as well as your Sendgrid Email Server Key: 
 ` "SendGridKey": "verySecretKeyHere", "SupportEmail": "yourOwnServiceEmail@yourDomain.com", `
+add the Facebook Client ID and Secret:
+`"FacebookAppID": "yourIDFromFacebookDevelopersConsole",`
+`"FacebookAppSecret": "yourSecretFromFacebookDevelopersConsole",`
 and the baseUrl for your client on dev:
 ` "BaseUrl": "https://localhost:4200/", `
 and respective copies on your production settings.
